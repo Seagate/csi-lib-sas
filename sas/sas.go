@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-package fibrechannel
+package sas
 
 import (
 	"fmt"
@@ -34,7 +34,7 @@ type ioHandler interface {
 	WriteFile(filename string, data []byte, perm os.FileMode) error
 }
 
-//Connector provides a struct to hold all of the needed parameters to make our Fibre Channel connection
+//Connector provides a struct to hold all of the needed parameters to make our SAS connection
 type Connector struct {
 	VolumeName string
 	TargetWWNs []string
@@ -156,7 +156,7 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 	}
 	// if no disk matches input wwn and lun, exit
 	if disk == "" && dm == "" {
-		return "", fmt.Errorf("no fc disk found")
+		return "", fmt.Errorf("no SAS disk found")
 	}
 
 	// if multipath devicemapper device is found, use it; otherwise use raw disk
@@ -169,7 +169,8 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 
 // given a wwn and lun, find the device and associated devicemapper parent
 func findDisk(wwn, lun string, io ioHandler) (string, string) {
-	FcPath := "-fc-0x" + wwn + "-lun-" + lun
+	// FcPath := "-fc-0x" + wwn + "-lun-" + lun
+	FcPath := "-0x" + wwn + "-lun-" + lun
 	DevPath := "/dev/disk/by-path/"
 	if dirs, err := io.ReadDir(DevPath); err == nil {
 		for _, f := range dirs {
@@ -205,7 +206,7 @@ func findDiskWWIDs(wwid string, io ioHandler) (string, string) {
 			if name == FcPath {
 				disk, err := io.EvalSymlinks(DevID + name)
 				if err != nil {
-					glog.Errorf("fc: failed to find a corresponding disk from symlink[%s], error %v", DevID+name, err)
+					glog.Errorf("sas: failed to find a corresponding disk from symlink[%s], error %v", DevID+name, err)
 					return "", ""
 				}
 				if dm, err1 := FindMultipathDeviceForDevice(disk, io); err1 != nil {
@@ -214,17 +215,17 @@ func findDiskWWIDs(wwid string, io ioHandler) (string, string) {
 			}
 		}
 	}
-	glog.Errorf("fc: failed to find a disk [%s]", DevID+FcPath)
+	glog.Errorf("sas: failed to find a disk [%s]", DevID+FcPath)
 	return "", ""
 }
 
-// Attach attempts to attach a fc volume to a node using the provided Connector info
+// Attach attempts to attach a sas volume to a node using the provided Connector info
 func Attach(c Connector, io ioHandler) (string, error) {
 	if io == nil {
 		io = &OSioHandler{}
 	}
 
-	glog.Infof("Attaching fibre channel volume")
+	glog.Infof("Attaching SAS volume")
 	devicePath, err := searchDisk(c, io)
 
 	if err != nil {
@@ -241,7 +242,7 @@ func Detach(devicePath string, io ioHandler) error {
 		io = &OSioHandler{}
 	}
 
-	glog.Infof("Detaching fibre channel volume")
+	glog.Infof("Detaching SAS volume")
 	var devices []string
 	dstPath, err := io.EvalSymlinks(devicePath)
 
@@ -256,20 +257,20 @@ func Detach(devicePath string, io ioHandler) error {
 		devices = append(devices, dstPath)
 	}
 
-	glog.Infof("fc: DetachDisk devicePath: %v, dstPath: %v, devices: %v", devicePath, dstPath, devices)
+	glog.Infof("sas: DetachDisk devicePath: %v, dstPath: %v, devices: %v", devicePath, dstPath, devices)
 
 	var lastErr error
 
 	for _, device := range devices {
 		err := detachFCDisk(device, io)
 		if err != nil {
-			glog.Errorf("fc: detachFCDisk failed. device: %v err: %v", device, err)
-			lastErr = fmt.Errorf("fc: detachFCDisk failed. device: %v err: %v", device, err)
+			glog.Errorf("sas: detachFCDisk failed. device: %v err: %v", device, err)
+			lastErr = fmt.Errorf("sas: detachFCDisk failed. device: %v err: %v", device, err)
 		}
 	}
 
 	if lastErr != nil {
-		glog.Errorf("fc: last error occurred during detach disk:\n%v", lastErr)
+		glog.Errorf("sas: last error occurred during detach disk:\n%v", lastErr)
 		return lastErr
 	}
 
@@ -298,7 +299,7 @@ func FindSlaveDevicesOnMultipath(dm string, io ioHandler) []string {
 func detachFCDisk(devicePath string, io ioHandler) error {
 	// Remove scsi device from the node.
 	if !strings.HasPrefix(devicePath, "/dev/") {
-		return fmt.Errorf("fc detach disk: invalid device name: %s", devicePath)
+		return fmt.Errorf("sas detach disk: invalid device name: %s", devicePath)
 	}
 	arr := strings.Split(devicePath, "/")
 	dev := arr[len(arr)-1]
@@ -309,7 +310,7 @@ func detachFCDisk(devicePath string, io ioHandler) error {
 // Removes a scsi device based upon /dev/sdX name
 func removeFromScsiSubsystem(deviceName string, io ioHandler) {
 	fileName := "/sys/block/" + deviceName + "/device/delete"
-	glog.Infof("fc: remove device from scsi-subsystem: path: %s", fileName)
+	glog.Infof("sas: remove device from scsi-subsystem: path: %s", fileName)
 	data := []byte("1")
 	io.WriteFile(fileName, data, 0666)
 }

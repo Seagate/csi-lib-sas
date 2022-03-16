@@ -17,19 +17,19 @@ package main
 
 import (
 	"github.com/golang/glog"
-	"github.com/kubernetes-csi/csi-lib-fc/fibrechannel"
+	"github.com/kubernetes-csi/csi-lib-fc/sas"
 )
 
 func main() {
-	c := fibrechannel.Connector{}
+	c := sas.Connector{}
 	//Host5 and host6 respectively
 	c.TargetWWNs = []string{"10000000c9a02834", "10000000c9a02835"}
 	c.Lun = "1"
-	dp, err := fibrechannel.Attach(c, &fibrechannel.OSioHandler{})
+	dp, err := sas.Attach(c, &sas.OSioHandler{})
 	glog.Infof("Path is: %s\n", dp)
 	if err != nil {
 		glog.Errorf("Error from Connect: %s\n", err)
 	}
 
-	fibrechannel.Detach(dp, &fibrechannel.OSioHandler{})
+	sas.Detach(dp, &sas.OSioHandler{})
 }

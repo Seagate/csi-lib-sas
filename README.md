@@ -1,10 +1,11 @@
-# CSI lib-fc 
+# CSI lib-sas
 
-A go package that can be imported to help CSI plugins with connecting to fibre channel devices. Simply import it and get access to the necessary functions
+A go package that can be imported to help CSI plugins with connecting to
+SAS devices. Simply import it and get access to the necessary functions.
 
 ## Goals
 
-Provide a basic, lightweight library for CSI Plugin Authors to leverage some of the common tasks on a node like connecting and disconnecting fibre channel devices. 
+Provide a basic, lightweight library for CSI Plugin Authors to leverage some of the common tasks on a node like connecting and disconnecting SAS devices. 
 
 We intentionally avoid pulling in additional dependencies, and we intend to be stateless and as such are not using receivers.  Currently the focus is strictly based on a CSI context.
 

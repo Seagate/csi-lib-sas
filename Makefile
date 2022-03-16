@@ -7,8 +7,8 @@ clean:
 	-rm -rf _output
 
 build:
-	go build ./fibrechannel/
+	go build ./sas/
 	go build -o _output/example ./example/main.go
 
 install:
-	go install ./fibrechannel/
+	go install ./sas/
