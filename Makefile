@@ -1,5 +1,15 @@
 .PHONY: all build clean install
 
+help:
+	@echo ""
+	@echo "-----------------------------------------------------------------------------------"
+	@echo "make all     - clean, build, install"
+	@echo "make build   - build sas and example"
+	@echo "make clean   - remove all generated files"
+	@echo "make install - install sas"
+	@echo "make run     - build, run example"
+	@echo ""
+
 all: clean build install
 
 clean: 
@@ -12,3 +22,6 @@ build:
 
 install:
 	go install ./sas/
+
+run: build
+	_output/example

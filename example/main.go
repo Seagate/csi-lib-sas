@@ -16,20 +16,39 @@ limitations under the License.
 package main
 
 import (
-	"github.com/golang/glog"
-	"github.com/kubernetes-csi/csi-lib-fc/sas"
+	"context"
+	"flag"
+	"strings"
+
+	"github.com/Seagate/csi-lib-sas/sas"
+	"k8s.io/klog/v2"
 )
 
 func main() {
-	c := sas.Connector{}
-	//Host5 and host6 respectively
-	c.TargetWWNs = []string{"10000000c9a02834", "10000000c9a02835"}
-	c.Lun = "1"
-	dp, err := sas.Attach(c, &sas.OSioHandler{})
-	glog.Infof("Path is: %s\n", dp)
-	if err != nil {
-		glog.Errorf("Error from Connect: %s\n", err)
-	}
+	// Enable contextual logging
+	ctx := context.Background()
+	klog.InitFlags(nil)
+	klog.EnableContextualLogging(true)
+	logger := klog.FromContext(ctx)
 
-	sas.Detach(dp, &sas.OSioHandler{})
+	wwns := flag.String("wwns", "", "Specify a comma separated list of WWNs")
+	lun := flag.String("lun", "1", "Specify a LUN, defaults to 1")
+	flag.Parse()
+
+	logger.Info("[] sas test example", "lun", *lun, "wwns", *wwns)
+
+	c := sas.Connector{}
+
+	// Use command line arguments for test settings
+	c.TargetWWNs = strings.Split(*wwns, ",")
+	c.Lun = *lun
+
+	dp, err := sas.Attach(ctx, c, &sas.OSioHandler{})
+
+	if err != nil {
+		logger.Error(err, "SAS Attach failure")
+	} else {
+		logger.Info("sas attach", "devicePath", dp)
+		sas.Detach(ctx, dp, &sas.OSioHandler{})
+	}
 }
