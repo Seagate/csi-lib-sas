@@ -59,11 +59,11 @@ func Attach(ctx context.Context, c Connector, io ioHandler) (string, error) {
 		io = &OSioHandler{}
 	}
 
-	logger.Info("Attaching SAS volume")
+	logger.V(1).Info("Attaching SAS volume")
 	devicePath, err := searchDisk(&logger, c, io)
 
 	if err != nil {
-		logger.Info("unable to find disk given WWNN or WWIDs")
+		logger.V(1).Info("unable to find disk given WWNN or WWIDs")
 		return "", err
 	}
 
@@ -78,7 +78,7 @@ func Detach(ctx context.Context, devicePath string, io ioHandler) error {
 		io = &OSioHandler{}
 	}
 
-	logger.Info("Detaching SAS volume", "devicePath", devicePath)
+	logger.V(1).Info("Detaching SAS volume", "devicePath", devicePath)
 	var devices []string
 	dstPath, err := io.EvalSymlinks(devicePath)
 
@@ -93,7 +93,7 @@ func Detach(ctx context.Context, devicePath string, io ioHandler) error {
 		devices = append(devices, dstPath)
 	}
 
-	logger.Info("sas: DetachDisk", "devicePath", devicePath, "dstPath", dstPath, "devices", devices)
+	logger.V(1).Info("sas: DetachDisk", "devicePath", devicePath, "dstPath", dstPath, "devices", devices)
 
 	var lastErr error
 
@@ -176,12 +176,12 @@ func findDeviceForPath(path string, io ioHandler) (string, error) {
 
 func scsiHostRescan(logger *logr.Logger, io ioHandler) {
 	scsiPath := "/sys/class/scsi_host/"
-	logger.V(2).Info("scsi host rescan", "scsiPath", scsiPath)
+	logger.V(4).Info("scsi host rescan", "scsiPath", scsiPath)
 	if dirs, err := io.ReadDir(scsiPath); err == nil {
 		for _, f := range dirs {
 			name := scsiPath + f.Name() + "/scan"
 			data := []byte("- - -")
-			logger.V(2).Info("io write file", "name", name, "data", data)
+			logger.V(4).Info("io write file", "name", name, "data", data)
 			io.WriteFile(name, data, 0666)
 		}
 	}
@@ -205,6 +205,8 @@ func searchDisk(logger *logr.Logger, c Connector, io ioHandler) (string, error) 
 	for true {
 
 		for _, diskID := range diskIds {
+			logger.V(2).Info("search for disk", "diskID", diskID)
+
 			if len(c.TargetWWNs) != 0 {
 				disk, dm = findDisk(logger, diskID, c.Lun, io)
 			} else {
@@ -221,6 +223,7 @@ func searchDisk(logger *logr.Logger, c Connector, io ioHandler) (string, error) 
 		}
 		// rescan and search again
 		// rescan scsi bus
+		logger.V(2).Info("scsi rescan host")
 		scsiHostRescan(logger, io)
 		rescaned = true
 	}
@@ -231,6 +234,7 @@ func searchDisk(logger *logr.Logger, c Connector, io ioHandler) (string, error) 
 
 	// if multipath devicemapper device is found, use it; otherwise use raw disk
 	if dm != "" {
+		logger.V(1).Info("multipath device was discovered", "dm", dm)
 		return dm, nil
 	}
 
@@ -240,17 +244,19 @@ func searchDisk(logger *logr.Logger, c Connector, io ioHandler) (string, error) 
 // given a wwn and lun, find the device and associated devicemapper parent
 func findDisk(logger *logr.Logger, wwn, lun string, io ioHandler) (string, string) {
 	// FcPath := "-fc-0x" + wwn + "-lun-" + lun
-	logger.V(2).Info("find disk", "wwn", wwn, "lun", lun)
-	sasPath := "-0x" + wwn + "-lun-" + lun
-	DevPath := "/dev/disk/by-path/"
+	logger.V(4).Info("find disk", "wwn", wwn, "lun", lun)
+	wwnPath := "wwn-0x" + wwn
+	DevPath := "/dev/disk/by-id/"
 	if dirs, err := io.ReadDir(DevPath); err == nil {
 		for _, f := range dirs {
 			name := f.Name()
-			logger.V(2).Info("find disk, searching...", "name", name, "sasPath", sasPath)
-			if strings.Contains(name, sasPath) {
+			logger.V(4).Info("checking", "contains", strings.Contains(name, wwnPath), "wwnPath", wwnPath, "name", name)
+			if strings.Contains(name, wwnPath) {
+				logger.V(4).Info("evaluate symbolic links", "DevPath+name", DevPath+name)
 				if disk, err1 := io.EvalSymlinks(DevPath + name); err1 == nil {
+					logger.V(4).Info("find multipath device", "disk", disk+name)
 					if dm, err2 := FindMultipathDeviceForDevice(disk, io); err2 == nil {
-						logger.V(2).Info("find disk, found", "disk", disk, "dm", dm)
+						logger.V(1).Info("found disk", "disk", disk, "dm", dm)
 						return disk, dm
 					}
 				}
@@ -271,13 +277,13 @@ func findDiskWWIDs(logger *logr.Logger, wwid string, io ioHandler) (string, stri
 	// The wwid could contain white space and it will be replaced
 	// underscore when wwid is exposed under /dev/by-id.
 
-	logger.V(2).Info("find disk wwids", "wwid", wwid)
+	logger.V(4).Info("find disk wwids", "wwid", wwid)
 	sasPath := "scsi-" + wwid
 	DevID := "/dev/disk/by-id/"
 	if dirs, err := io.ReadDir(DevID); err == nil {
 		for _, f := range dirs {
 			name := f.Name()
-			logger.V(2).Info("find disk wwids, searching...", "name", name, "sasPath", sasPath)
+			logger.V(4).Info("find disk wwids, searching...", "name", name, "sasPath", sasPath)
 			if name == sasPath {
 				disk, err := io.EvalSymlinks(DevID + name)
 				if err != nil {
@@ -285,7 +291,7 @@ func findDiskWWIDs(logger *logr.Logger, wwid string, io ioHandler) (string, stri
 					return "", ""
 				}
 				if dm, err1 := FindMultipathDeviceForDevice(disk, io); err1 != nil {
-					logger.V(2).Info("find disk wwids, found", "disk", disk, "dm", dm)
+					logger.V(4).Info("find disk wwids, found", "disk", disk, "dm", dm)
 					return disk, dm
 				}
 			}

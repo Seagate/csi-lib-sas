@@ -35,12 +35,13 @@ func main() {
 	lun := flag.String("lun", "1", "Specify a LUN, defaults to 1")
 	flag.Parse()
 
-	logger.Info("[] sas test example", "lun", *lun, "wwns", *wwns)
+	lcwwns := strings.ToLower(*wwns)
+	logger.Info("[] sas test example", "lun", *lun, "wwns", lcwwns)
 
 	c := sas.Connector{}
 
 	// Use command line arguments for test settings
-	c.TargetWWNs = strings.Split(*wwns, ",")
+	c.TargetWWNs = strings.Split(lcwwns, ",")
 	c.Lun = *lun
 
 	dp, err := sas.Attach(ctx, c, &sas.OSioHandler{})
@@ -48,7 +49,7 @@ func main() {
 	if err != nil {
 		logger.Error(err, "SAS Attach failure")
 	} else {
-		logger.Info("sas attach", "devicePath", dp)
+		logger.Info("SAS Attach success", "devicePath", dp)
 		sas.Detach(ctx, dp, &sas.OSioHandler{})
 	}
 }
