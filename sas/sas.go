@@ -16,8 +16,8 @@ limitations under the License.
 package sas
 
 import (
+	"context"
 	"fmt"
-	"github.com/golang/glog"
 	"io/ioutil"
 	"os"
 
@@ -25,6 +25,9 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/go-logr/logr"
+	"k8s.io/klog/v2"
 )
 
 type ioHandler interface {
@@ -45,6 +48,72 @@ type Connector struct {
 
 //OSioHandler is a wrapper that includes all the necessary io functions used for (Should be used as default io handler)
 type OSioHandler struct{}
+
+// PUBLIC
+
+// Attach attempts to attach a sas volume to a node using the provided Connector info
+func Attach(ctx context.Context, c Connector, io ioHandler) (string, error) {
+	logger := klog.FromContext(ctx)
+
+	if io == nil {
+		io = &OSioHandler{}
+	}
+
+	logger.V(1).Info("Attaching SAS volume")
+	devicePath, err := searchDisk(&logger, c, io)
+
+	if err != nil {
+		logger.V(1).Info("unable to find disk given WWNN or WWIDs")
+		return "", err
+	}
+
+	return devicePath, nil
+}
+
+// Detach performs a detach operation on a volume
+func Detach(ctx context.Context, devicePath string, io ioHandler) error {
+	logger := klog.FromContext(ctx)
+
+	if io == nil {
+		io = &OSioHandler{}
+	}
+
+	logger.V(1).Info("Detaching SAS volume", "devicePath", devicePath)
+	var devices []string
+	dstPath, err := io.EvalSymlinks(devicePath)
+
+	if err != nil {
+		return err
+	}
+
+	if strings.HasPrefix(dstPath, "/dev/dm-") {
+		devices = FindSlaveDevicesOnMultipath(dstPath, io)
+	} else {
+		// Add single devicepath to devices
+		devices = append(devices, dstPath)
+	}
+
+	logger.V(1).Info("sas: DetachDisk", "devicePath", devicePath, "dstPath", dstPath, "devices", devices)
+
+	var lastErr error
+
+	for _, device := range devices {
+		err := detachFCDisk(&logger, device, io)
+		if err != nil {
+			logger.Error(err, "sas: detachFCDisk failed", "device", device)
+			lastErr = fmt.Errorf("sas: detachFCDisk failed. device: %v err: %v", device, err)
+		}
+	}
+
+	if lastErr != nil {
+		logger.Error(lastErr, "sas: last error occurred during detach disk")
+		return lastErr
+	}
+
+	return nil
+}
+
+// PRIVATE
 
 //ReadDir calls the ReadDir function from ioutil package
 func (handler *OSioHandler) ReadDir(dirname string) ([]os.FileInfo, error) {
@@ -105,18 +174,20 @@ func findDeviceForPath(path string, io ioHandler) (string, error) {
 	return "", errors.New("Illegal path for device " + devicePath)
 }
 
-func scsiHostRescan(io ioHandler) {
+func scsiHostRescan(logger *logr.Logger, io ioHandler) {
 	scsiPath := "/sys/class/scsi_host/"
+	logger.V(4).Info("scsi host rescan", "scsiPath", scsiPath)
 	if dirs, err := io.ReadDir(scsiPath); err == nil {
 		for _, f := range dirs {
 			name := scsiPath + f.Name() + "/scan"
 			data := []byte("- - -")
+			logger.V(4).Info("io write file", "name", name, "data", data)
 			io.WriteFile(name, data, 0666)
 		}
 	}
 }
 
-func searchDisk(c Connector, io ioHandler) (string, error) {
+func searchDisk(logger *logr.Logger, c Connector, io ioHandler) (string, error) {
 	var diskIds []string
 	var disk string
 	var dm string
@@ -134,14 +205,15 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 	for true {
 
 		for _, diskID := range diskIds {
+			logger.V(2).Info("search for disk", "diskID", diskID)
+
 			if len(c.TargetWWNs) != 0 {
-				disk, dm = findDisk(diskID, c.Lun, io)
+				disk, dm = findDisk(logger, diskID, c.Lun, io)
 			} else {
-				disk, dm = findDiskWWIDs(diskID, io)
+				disk, dm = findDiskWWIDs(logger, diskID, io)
 			}
 			// if multipath device is found, break
 			if dm != "" {
-
 				break
 			}
 		}
@@ -151,7 +223,8 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 		}
 		// rescan and search again
 		// rescan scsi bus
-		scsiHostRescan(io)
+		logger.V(2).Info("scsi rescan host")
+		scsiHostRescan(logger, io)
 		rescaned = true
 	}
 	// if no disk matches input wwn and lun, exit
@@ -161,6 +234,7 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 
 	// if multipath devicemapper device is found, use it; otherwise use raw disk
 	if dm != "" {
+		logger.V(1).Info("multipath device was discovered", "dm", dm)
 		return dm, nil
 	}
 
@@ -168,16 +242,21 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 }
 
 // given a wwn and lun, find the device and associated devicemapper parent
-func findDisk(wwn, lun string, io ioHandler) (string, string) {
+func findDisk(logger *logr.Logger, wwn, lun string, io ioHandler) (string, string) {
 	// FcPath := "-fc-0x" + wwn + "-lun-" + lun
-	FcPath := "-0x" + wwn + "-lun-" + lun
-	DevPath := "/dev/disk/by-path/"
+	logger.V(4).Info("find disk", "wwn", wwn, "lun", lun)
+	wwnPath := "wwn-0x" + wwn
+	DevPath := "/dev/disk/by-id/"
 	if dirs, err := io.ReadDir(DevPath); err == nil {
 		for _, f := range dirs {
 			name := f.Name()
-			if strings.Contains(name, FcPath) {
+			logger.V(4).Info("checking", "contains", strings.Contains(name, wwnPath), "wwnPath", wwnPath, "name", name)
+			if strings.Contains(name, wwnPath) {
+				logger.V(4).Info("evaluate symbolic links", "DevPath+name", DevPath+name)
 				if disk, err1 := io.EvalSymlinks(DevPath + name); err1 == nil {
+					logger.V(4).Info("find multipath device", "disk", disk+name)
 					if dm, err2 := FindMultipathDeviceForDevice(disk, io); err2 == nil {
+						logger.V(1).Info("found disk", "disk", disk, "dm", dm)
 						return disk, dm
 					}
 				}
@@ -188,7 +267,7 @@ func findDisk(wwn, lun string, io ioHandler) (string, string) {
 }
 
 // given a wwid, find the device and associated devicemapper parent
-func findDiskWWIDs(wwid string, io ioHandler) (string, string) {
+func findDiskWWIDs(logger *logr.Logger, wwid string, io ioHandler) (string, string) {
 	// Example wwid format:
 	//   3600508b400105e210000900000490000
 	//   <VENDOR NAME> <IDENTIFIER NUMBER>
@@ -198,83 +277,28 @@ func findDiskWWIDs(wwid string, io ioHandler) (string, string) {
 	// The wwid could contain white space and it will be replaced
 	// underscore when wwid is exposed under /dev/by-id.
 
-	FcPath := "scsi-" + wwid
+	logger.V(4).Info("find disk wwids", "wwid", wwid)
+	sasPath := "scsi-" + wwid
 	DevID := "/dev/disk/by-id/"
 	if dirs, err := io.ReadDir(DevID); err == nil {
 		for _, f := range dirs {
 			name := f.Name()
-			if name == FcPath {
+			logger.V(4).Info("find disk wwids, searching...", "name", name, "sasPath", sasPath)
+			if name == sasPath {
 				disk, err := io.EvalSymlinks(DevID + name)
 				if err != nil {
-					glog.Errorf("sas: failed to find a corresponding disk from symlink[%s], error %v", DevID+name, err)
+					logger.Error(err, "sas: failed to find a corresponding disk from symlink", "DevID", DevID, "name", name, "DevID+name", DevID+name)
 					return "", ""
 				}
 				if dm, err1 := FindMultipathDeviceForDevice(disk, io); err1 != nil {
+					logger.V(4).Info("find disk wwids, found", "disk", disk, "dm", dm)
 					return disk, dm
 				}
 			}
 		}
 	}
-	glog.Errorf("sas: failed to find a disk [%s]", DevID+FcPath)
+	logger.Info("sas: failed to find a disk", "DevID", DevID, "sasPath", sasPath)
 	return "", ""
-}
-
-// Attach attempts to attach a sas volume to a node using the provided Connector info
-func Attach(c Connector, io ioHandler) (string, error) {
-	if io == nil {
-		io = &OSioHandler{}
-	}
-
-	glog.Infof("Attaching SAS volume")
-	devicePath, err := searchDisk(c, io)
-
-	if err != nil {
-		glog.Infof("unable to find disk given WWNN or WWIDs")
-		return "", err
-	}
-
-	return devicePath, nil
-}
-
-// Detach performs a detach operation on a volume
-func Detach(devicePath string, io ioHandler) error {
-	if io == nil {
-		io = &OSioHandler{}
-	}
-
-	glog.Infof("Detaching SAS volume")
-	var devices []string
-	dstPath, err := io.EvalSymlinks(devicePath)
-
-	if err != nil {
-		return err
-	}
-
-	if strings.HasPrefix(dstPath, "/dev/dm-") {
-		devices = FindSlaveDevicesOnMultipath(dstPath, io)
-	} else {
-		// Add single devicepath to devices
-		devices = append(devices, dstPath)
-	}
-
-	glog.Infof("sas: DetachDisk devicePath: %v, dstPath: %v, devices: %v", devicePath, dstPath, devices)
-
-	var lastErr error
-
-	for _, device := range devices {
-		err := detachFCDisk(device, io)
-		if err != nil {
-			glog.Errorf("sas: detachFCDisk failed. device: %v err: %v", device, err)
-			lastErr = fmt.Errorf("sas: detachFCDisk failed. device: %v err: %v", device, err)
-		}
-	}
-
-	if lastErr != nil {
-		glog.Errorf("sas: last error occurred during detach disk:\n%v", lastErr)
-		return lastErr
-	}
-
-	return nil
 }
 
 //FindSlaveDevicesOnMultipath returns all slaves on the multipath device given the device path
@@ -296,21 +320,21 @@ func FindSlaveDevicesOnMultipath(dm string, io ioHandler) []string {
 }
 
 // detachFCDisk removes scsi device file such as /dev/sdX from the node.
-func detachFCDisk(devicePath string, io ioHandler) error {
+func detachFCDisk(logger *logr.Logger, devicePath string, io ioHandler) error {
 	// Remove scsi device from the node.
 	if !strings.HasPrefix(devicePath, "/dev/") {
 		return fmt.Errorf("sas detach disk: invalid device name: %s", devicePath)
 	}
 	arr := strings.Split(devicePath, "/")
 	dev := arr[len(arr)-1]
-	removeFromScsiSubsystem(dev, io)
+	removeFromScsiSubsystem(logger, dev, io)
 	return nil
 }
 
 // Removes a scsi device based upon /dev/sdX name
-func removeFromScsiSubsystem(deviceName string, io ioHandler) {
+func removeFromScsiSubsystem(logger *logr.Logger, deviceName string, io ioHandler) {
 	fileName := "/sys/block/" + deviceName + "/device/delete"
-	glog.Infof("sas: remove device from scsi-subsystem: path: %s", fileName)
+	logger.Info("sas: remove device from scsi-subsystem", "path", fileName)
 	data := []byte("1")
 	io.WriteFile(fileName, data, 0666)
 }
