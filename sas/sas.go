@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 
 	"errors"
 	"path"
@@ -39,13 +40,13 @@ type ioHandler interface {
 
 //Connector provides a struct to hold all of the needed parameters to make our SAS connection
 type Connector struct {
-	VolumeName string
-	TargetWWNs []string
-	Lun        string
-	WWIDs      []string
-	io         ioHandler
-	Multipath  bool
-	DevicePath string
+	VolumeName string   `json:"volume_name"`
+	TargetWWNs []string `json:"target_wwns"`
+	Lun        string   `json:"lun"`
+	WWIDs      []string `json:"wwids"`
+	Multipath  bool     `json:"multipath"`
+	DevicePath string   `json:"device_path"`
+	IoHandler  ioHandler
 }
 
 //OSioHandler is a wrapper that includes all the necessary io functions used for (Should be used as default io handler)
@@ -131,6 +132,33 @@ func (c *Connector) Persist(ctx context.Context, filePath string) error {
 		logger.Error(err, "Could not encode the connector")
 		return fmt.Errorf("error encoding connector: %v", err)
 	}
+	return nil
+}
+
+// GetConnectorFromFile attempts to create a Connector using the specified json file (ie /var/lib/pfile/myConnector.json)
+func GetConnectorFromFile(filePath string) (*Connector, error) {
+	f, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	c := Connector{}
+	err = json.Unmarshal([]byte(f), &c)
+	if err != nil {
+		return nil, err
+	}
+
+	return &c, nil
+}
+
+// ResizeMultipathDevice: resize a multipath device based on its underlying devices
+func ResizeMultipathDevice(ctx context.Context, devicePath string) error {
+	logger := klog.FromContext(ctx)
+	logger.V(1).Info("Resizing multipath device", "device", devicePath)
+
+	if output, err := exec.Command("multipathd", "resize", "map", devicePath).CombinedOutput(); err != nil {
+		return fmt.Errorf("could not resize multipath device: %s (%v)", output, err)
+	}
+
 	return nil
 }
 
