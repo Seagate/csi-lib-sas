@@ -8,6 +8,7 @@ help:
 	@echo "make clean   - remove all generated files"
 	@echo "make install - install sas"
 	@echo "make run     - build, run example"
+	@echo "make test    - run sas unit test"
 	@echo ""
 
 all: clean build install
@@ -25,3 +26,6 @@ install:
 
 run: build
 	_output/example
+
+test:
+	go test -v ./sas/
