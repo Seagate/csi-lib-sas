@@ -18,10 +18,26 @@ package main
 import (
 	"context"
 	"flag"
-	"strings"
+	"fmt"
 
 	"github.com/Seagate/csi-lib-sas/sas"
 	"k8s.io/klog/v2"
+)
+
+// Define usage and some common examples
+const (
+	usage = `====================================================================================================
+example - Run the SAS Library Example Program
+
+Examples:
+./example -wwn 600c0ff000546067369fe36201000000
+./example -wwn 600c0ff000546067369fe36201000000 -v=4
+./example -wwn 600c0ff000546067369fe36201000000 -v=4 -detach
+
+Low level library commands require sudo or root privilege. You must provide a wwn to be succeed.
+
+Options:
+`
 )
 
 func main() {
@@ -31,25 +47,36 @@ func main() {
 	klog.EnableContextualLogging(true)
 	logger := klog.FromContext(ctx)
 
-	wwns := flag.String("wwns", "", "Specify a comma separated list of WWNs")
-	lun := flag.String("lun", "1", "Specify a LUN, defaults to 1")
+	wwn := flag.String("wwn", "", "Specify a WWN")
+	detach := flag.Bool("detach", false, "automatically detach after a successful attach")
+
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), usage)
+		flag.PrintDefaults()
+	}
+
 	flag.Parse()
 
-	lcwwns := strings.ToLower(*wwns)
-	logger.Info("[] sas test example", "lun", *lun, "wwns", lcwwns)
-
-	c := sas.Connector{}
+	logger.Info("[] sas test example", "wwn", *wwn, "detach", *detach)
 
 	// Use command line arguments for test settings
-	c.TargetWWNs = strings.Split(lcwwns, ",")
-	c.Lun = *lun
+	c := sas.Connector{
+		TargetWWN: *wwn,
+	}
 
-	dp, err := sas.Attach(ctx, c, &sas.OSioHandler{})
+	dp, err := sas.Attach(ctx, &c, &sas.OSioHandler{})
 
 	if err != nil {
 		logger.Error(err, "SAS Attach failure")
 	} else {
-		logger.Info("SAS Attach success", "devicePath", dp)
-		sas.Detach(ctx, dp, &sas.OSioHandler{})
+		logger.Info("SAS Attach success", "device", dp, "connector", c)
+		if *detach {
+			err = sas.Detach(ctx, dp, &sas.OSioHandler{})
+			if err == nil {
+				logger.Error(err, "SAS Detach success")
+			} else {
+				logger.Error(err, "SAS Detach failure")
+			}
+		}
 	}
 }

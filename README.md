@@ -1,7 +1,6 @@
-# CSI lib-sas
+# csi-lib-sas
 
-A go package that can be imported to help CSI plugins with connecting to
-SAS devices. Simply import it and get access to the necessary functions.
+A go package that can be imported to help CSI plugins connect to SAS devices. Simply import it and get access to the necessary functions.
 
 ## Goals
 
@@ -10,9 +9,15 @@ Provide a basic, lightweight library for CSI Plugin Authors to leverage some of 
 We intentionally avoid pulling in additional dependencies, and we intend to be stateless and as such are not using receivers.  Currently the focus is strictly based on a CSI context.
 
 ## Design Philosophy
- The idea is to keep this as lightweight and generic as possible.  We intentionally avoid the use of any third party
-libraries or packages in this project.  We don't have a vendor directory, because we attempt to rely only on the std
-golang libs.  This may prove to not be ideal, and may be changed over time, but initially it's a worthwhile goal. 
+
+The idea is to keep this as lightweight and generic as possible.  We intentionally avoid the use of any third party libraries or packages in this project.  We don't have a vendor directory, because we attempt to rely only on the std golang libs.
+
+This library leverages structured and contextual logging. Logging verbosity can be increased using the standard -v=# syntax.
+
+## SAS Library Backgroud
+
+- An [example program](example/main.go) is provided for library usage: 
+- A [SAS Guidebook](GUIDEBOOK.md) details SAS specific system information and example program usage.
 
 ## Community, discussion, contribution, and support
 

@@ -66,7 +66,7 @@ func (handler *fakeIOHandler) ReadDir(dirname string) ([]os.FileInfo, error) {
 		return []os.FileInfo{f}, nil
 	case "/dev/disk/by-id/":
 		f := &fakeFileInfo{
-			name: "wwn-0x500a0981891b8dc5",
+			name: "wwn-0x3600508b400105e210000900000490000",
 		}
 		return []os.FileInfo{f}, nil
 	}
@@ -89,13 +89,12 @@ func TestSearchDisk(t *testing.T) {
 	logger, _ := ktesting.NewTestContext(t)
 	fakeConnector := Connector{
 		VolumeName: "fakeVol",
-		TargetWWNs: []string{"500a0981891b8dc5"},
-		Lun:        "0",
+		TargetWWN:  "3600508b400105e210000900000490000",
 	}
 
-	devicePath, error := searchDisk(logger, fakeConnector, &fakeIOHandler{})
+	error := discoverDevices(logger, &fakeConnector, &fakeIOHandler{})
 
-	if devicePath == "" || error != nil {
+	if error != nil {
 		t.Errorf("no disk found")
 	}
 }
@@ -103,19 +102,9 @@ func TestSearchDisk(t *testing.T) {
 func TestInvalidWWN(t *testing.T) {
 	logger, _ := ktesting.NewTestContext(t)
 	testWwn := "INVALIDWWN"
-	disk, dm := findDisk(logger, testWwn, "1", &fakeIOHandler{})
+	dm, devices := findDiskById(logger, testWwn, &fakeIOHandler{})
 
-	if disk != "" && dm != "" {
+	if len(devices) > 0 || dm != "" {
 		t.Error("Found a disk with WWN that does not Exist")
-	}
-}
-
-func TestInvalidWWID(t *testing.T) {
-	logger, _ := ktesting.NewTestContext(t)
-	testWWID := "INVALIDWWID"
-	disk, dm := findDiskWWIDs(logger, testWWID, &fakeIOHandler{})
-
-	if disk != "" && dm != "" {
-		t.Error("Found a disk with WWID that does not Exist")
 	}
 }

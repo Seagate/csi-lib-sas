@@ -25,7 +25,7 @@ install:
 	go install ./sas/
 
 run: build
-	_output/example
+	_output/example -h
 
 test:
 	go test -v ./sas/
