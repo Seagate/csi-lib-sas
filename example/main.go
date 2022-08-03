@@ -61,7 +61,7 @@ func main() {
 
 	// Use command line arguments for test settings
 	c := sas.Connector{
-		TargetWWN: *wwn,
+		VolumeWWN: *wwn,
 	}
 
 	dp, err := sas.Attach(ctx, &c, &sas.OSioHandler{})

@@ -89,7 +89,7 @@ func TestSearchDisk(t *testing.T) {
 	logger, _ := ktesting.NewTestContext(t)
 	fakeConnector := Connector{
 		VolumeName: "fakeVol",
-		TargetWWN:  "3600508b400105e210000900000490000",
+		VolumeWWN:  "3600508b400105e210000900000490000",
 	}
 
 	error := discoverDevices(logger, &fakeConnector, &fakeIOHandler{})

@@ -39,12 +39,12 @@ type ioHandler interface {
 
 // Connector provides a struct to hold all of the needed parameters to make our SAS connection
 type Connector struct {
-	VolumeName   string   `json:"volume_name"`
-	TargetWWN    string   `json:"target_wwn"`
-	Multipath    bool     `json:"multipath"`
-	TargetDevice string   `json:"target_device"`
-	SCSIDevices  []string `json:"scsi_devices"`
-	IoHandler    ioHandler
+	VolumeName    string    `json:"volume_name"`    // Passed In: A name given to the storage volume by the provisioner, for debugging.
+	VolumeWWN     string    `json:"volume_wwn"`     // Passed In: 128 bit world wide name given to storage volume.
+	Multipath     bool      `json:"multipath"`      // Discovered: True indicates that OSPathName is a multipath device (dm-#), otherwise it is a regular device (/dev/sdX)
+	OSPathName    string    `json:"os_device_path"` // Discovered: The OS path to the storage volume WWN, for example /dev/sdb or /dev/dm-5
+	OSDevicePaths []string  `json:"scsi_devices"`   // Discovered: The OS path(s) to the storage volume WWN, for example ["/dev/sdb"] or ["/dev/sdb", "/dev/sdc"]
+	IoHandler     ioHandler // Passed In
 }
 
 // OSioHandler is a wrapper that includes all the necessary io functions used for (Should be used as default io handler)
@@ -68,7 +68,7 @@ func Attach(ctx context.Context, c *Connector, io ioHandler) (string, error) {
 		return "", err
 	}
 
-	return c.TargetDevice, nil
+	return c.OSPathName, nil
 }
 
 // Detach performs a detach operation on a volume
@@ -200,7 +200,7 @@ func discoverDevices(logger klog.Logger, c *Connector, io ioHandler) error {
 	var devices []string
 
 	c.Multipath = false
-	c.TargetDevice = ""
+	c.OSPathName = ""
 	rescaned := false
 
 	// two-phase search:
@@ -209,21 +209,21 @@ func discoverDevices(logger klog.Logger, c *Connector, io ioHandler) error {
 	for true {
 
 		// Find the multipath device using WWN
-		dm, devices = findDiskById(logger, c.TargetWWN, io)
+		dm, devices = findDiskById(logger, c.VolumeWWN, io)
 		logger.V(1).Info("find disk by id returned", "dm", dm, "devices", devices)
 
 		for _, device := range devices {
 			logger.V(3).Info("add scsi device", "device", device)
 			if device != "" {
-				c.SCSIDevices = append(c.SCSIDevices, device)
+				c.OSDevicePaths = append(c.OSDevicePaths, device)
 			}
 		}
 
 		// if multipath device is found, break
-		if dm != "" && len(c.SCSIDevices) > 0 {
+		if dm != "" && len(c.OSDevicePaths) > 0 {
 			c.Multipath = true
-			c.TargetDevice = dm
-			logger.V(1).Info("multipath device was discovered", "dm", dm, "SCSIDevices", c.SCSIDevices)
+			c.OSPathName = dm
+			logger.V(1).Info("multipath device was discovered", "dm", dm, "OSDevicePaths", c.OSDevicePaths)
 			break
 		}
 
@@ -239,7 +239,7 @@ func discoverDevices(logger klog.Logger, c *Connector, io ioHandler) error {
 	}
 
 	// if no disk matches input wwn, return error
-	c.TargetDevice = dm
+	c.OSPathName = dm
 	if dm == "" {
 		err := fmt.Errorf("no SAS disk found")
 		logger.Error(err, "no device discovered", "dm", dm)
