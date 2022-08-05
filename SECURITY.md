@@ -6,14 +6,13 @@ We take the security of the csi-lib-sas project seriously. If you find any secur
 
 :warning: **Please do not publicly report any security vulnerabilities via GitHub issues.**
 
-If you have concerns or questions, please email us at [opensource@seagate.com](mailto:opensource@seagate.com). 
+If you have concerns or questions, please email us at [opensource@seagate.com](mailto:opensource@seagate.com).
 
 To report an actual vulnerability, please use the "[Seagate Responsible Vulnerability Disclosure Policy](https://www.seagate.com/legal-privacy/responsible-vulnerability-disclosure-policy/)"
- 
 
 ### Reporting Format
 
-To make your reporting meaningful and help us understand the nature and scope of the issue, please include as much information as possible. 
+To make your reporting meaningful and help us understand the nature and scope of the issue, please include as much information as possible.
 
 ### Preferred Languages
 
