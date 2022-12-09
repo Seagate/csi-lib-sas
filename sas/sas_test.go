@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-   http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -102,7 +102,7 @@ func TestSearchDisk(t *testing.T) {
 func TestInvalidWWN(t *testing.T) {
 	logger, _ := ktesting.NewTestContext(t)
 	testWwn := "INVALIDWWN"
-	dm, devices := findDiskById(logger, testWwn, &fakeIOHandler{})
+	dm, devices := FindDiskById(logger, testWwn, &fakeIOHandler{})
 
 	if len(devices) > 0 || dm != "" {
 		t.Error("Found a disk with WWN that does not Exist")
