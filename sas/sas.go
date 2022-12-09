@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-   http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"time"
 
 	"path"
 	"path/filepath"
@@ -29,6 +30,13 @@ import (
 
 	"k8s.io/klog/v2"
 )
+
+// Number of times to retry device discovery
+const discoveryRetries = 5
+
+// sleep time in milliseconds between device discovery iterations.
+// May need to be adjusted to be longer if multipath discovery is not occuring quickly enough
+const discoverySleepTime = 500
 
 type ioHandler interface {
 	ReadDir(dirname string) ([]os.FileInfo, error)
@@ -160,22 +168,22 @@ func ResizeMultipathDevice(ctx context.Context, devicePath string) error {
 
 // PRIVATE
 
-//ReadDir calls the ReadDir function from ioutil package
+// ReadDir calls the ReadDir function from ioutil package
 func (handler *OSioHandler) ReadDir(dirname string) ([]os.FileInfo, error) {
 	return ioutil.ReadDir(dirname)
 }
 
-//Lstat calls the Lstat function from os package
+// Lstat calls the Lstat function from os package
 func (handler *OSioHandler) Lstat(name string) (os.FileInfo, error) {
 	return os.Lstat(name)
 }
 
-//EvalSymlinks calls EvalSymlinks from filepath package
+// EvalSymlinks calls EvalSymlinks from filepath package
 func (handler *OSioHandler) EvalSymlinks(path string) (string, error) {
 	return filepath.EvalSymlinks(path)
 }
 
-//WriteFile calls WriteFile from ioutil package
+// WriteFile calls WriteFile from ioutil package
 func (handler *OSioHandler) WriteFile(filename string, data []byte, perm os.FileMode) error {
 	return ioutil.WriteFile(filename, data, perm)
 }
@@ -201,15 +209,17 @@ func discoverDevices(logger klog.Logger, c *Connector, io ioHandler) error {
 
 	c.Multipath = false
 	c.OSPathName = ""
-	rescaned := false
+	retries := 0
 
 	// two-phase search:
 	// first phase, search existing device paths, if a multipath dm is found, exit loop
 	// otherwise, in second phase, rescan scsi bus and search again, return with any findings
-	for true {
+	for retries < discoveryRetries {
 
 		// Find the multipath device using WWN
-		dm, devices = findDiskById(logger, c.VolumeWWN, io)
+		logger.V(5).Info("Sleeping 0.5 seconds before device discovery")
+		time.Sleep(discoverySleepTime * time.Millisecond)
+		dm, devices = FindDiskById(logger, c.VolumeWWN, io)
 		logger.V(1).Info("find disk by id returned", "dm", dm, "devices", devices)
 
 		for _, device := range devices {
@@ -227,15 +237,9 @@ func discoverDevices(logger klog.Logger, c *Connector, io ioHandler) error {
 			break
 		}
 
-		// if a dm is found, exit loop
-		if rescaned || dm != "" {
-			break
-		}
-
-		// rescan scsi hosts and search again
 		logger.V(2).Info("scsi rescan host")
 		scsiHostRescan(logger, io)
-		rescaned = true
+		retries++
 	}
 
 	// if no disk matches input wwn, return error
@@ -249,8 +253,8 @@ func discoverDevices(logger klog.Logger, c *Connector, io ioHandler) error {
 	return nil
 }
 
-// findDiskById: given a wwn of the storage volume, find the multipath device and associated scsi devices
-func findDiskById(logger klog.Logger, wwn string, io ioHandler) (string, []string) {
+// FindDiskById: given a wwn of the storage volume, find the multipath device and associated scsi devices
+func FindDiskById(logger klog.Logger, wwn string, io ioHandler) (string, []string) {
 
 	// Example multipath device naming:
 	// Under /dev/disk/by-id:
@@ -260,21 +264,14 @@ func findDiskById(logger klog.Logger, wwn string, io ioHandler) (string, []strin
 	//   wwn-0x600c0ff0005460670a4ae16201000000 -> ../../dm-5
 
 	var devices []string
-	wwnPath := "wwn-0x" + wwn
-	devPath := "/dev/disk/by-id/"
-	logger.V(2).Info("find disk by id", "wwnPath", wwnPath, "devPath", devPath)
+	devPath := "/dev/disk/by-id/wwn-0x" + wwn
+	logger.V(2).Info("find disk by id", "devPath", devPath)
 
-	if dirs, err := io.ReadDir(devPath); err == nil {
-		for _, f := range dirs {
-			name := f.Name()
-			logger.V(4).Info("checking", "contains", strings.Contains(name, wwnPath), "name", name)
-			if strings.Contains(name, wwnPath) {
-				logger.V(2).Info("found device, evaluate symbolic links", "devPath", devPath, "name", name)
-				if dm, err1 := io.EvalSymlinks(devPath + name); err1 == nil {
-					devices = FindLinkedDevicesOnMultipath(logger, dm, io)
-					return dm, devices
-				}
-			}
+	if _, err := os.Stat(devPath); err == nil {
+		logger.V(2).Info("found device, evaluate symbolic links", "devPath", devPath)
+		if dm, err1 := io.EvalSymlinks(devPath); err1 == nil {
+			devices = FindLinkedDevicesOnMultipath(logger, dm, io)
+			return dm, devices
 		}
 	}
 	return "", devices
